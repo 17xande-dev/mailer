@@ -28,8 +28,12 @@ import (
 )
 
 // ScopeSMTP is the resource for SMTP submission to Exchange Online, and the
-// default. Graph would be "https://graph.microsoft.com/.default".
+// default.
 const ScopeSMTP = "https://outlook.office365.com/.default"
+
+// ScopeGraph is the resource for the Microsoft Graph API, for use with
+// WithScope when the token is for GraphSender rather than SMTP.
+const ScopeGraph = "https://graph.microsoft.com/.default"
 
 const defaultLoginBase = "https://login.microsoftonline.com"
 

@@ -129,7 +129,7 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 		token = t
 	}
 
-	msg, err := s.build(m)
+	msg, err := buildMIME(m, mimeOptions{From: s.cfg.From, DefaultReplyTo: s.cfg.ReplyTo})
 	if err != nil {
 		return err
 	}
@@ -142,44 +142,6 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 		return fmt.Errorf("mailer: send to %s: %w", strings.Join(m.To, ", "), err)
 	}
 	return nil
-}
-
-// build turns a Message into the library's representation.
-func (s *SMTPSender) build(m Message) (*mail.Msg, error) {
-	msg := mail.NewMsg()
-	if err := msg.From(s.cfg.From); err != nil {
-		return nil, fmt.Errorf("mailer: from address %q: %w", s.cfg.From, err)
-	}
-	to := nonBlank(m.To)
-	if err := msg.To(to...); err != nil {
-		return nil, fmt.Errorf("mailer: recipients %q: %w", strings.Join(to, ", "), err)
-	}
-	// Blind recipients go to the envelope only. The library writes To, Cc and
-	// Reply-To into the headers and deliberately never writes Bcc, which is
-	// exactly what keeps these addresses hidden from everyone else on the
-	// message. Do not "fix" this by adding a Bcc header.
-	if bcc := nonBlank(m.Bcc); len(bcc) > 0 {
-		if err := msg.Bcc(bcc...); err != nil {
-			return nil, fmt.Errorf("mailer: blind recipients %q: %w", strings.Join(bcc, ", "), err)
-		}
-	}
-	// A message's own Reply-To wins over the deployment-wide default, so mail
-	// sent on somebody's behalf can be answered to them.
-	if replyTo := firstNonEmpty(m.ReplyTo, s.cfg.ReplyTo); replyTo != "" {
-		if err := msg.ReplyTo(replyTo); err != nil {
-			return nil, fmt.Errorf("mailer: reply-to %q: %w", replyTo, err)
-		}
-	}
-	msg.Subject(m.Subject)
-
-	// Plain text is the body and HTML is the alternative, in that order, which is
-	// what makes a client that cannot or will not render HTML show the readable
-	// version rather than nothing.
-	msg.SetBodyString(mail.TypeTextPlain, m.Text)
-	if m.HTML != "" {
-		msg.AddAlternativeString(mail.TypeTextHTML, m.HTML)
-	}
-	return msg, nil
 }
 
 // client builds the SMTP client for one send.
@@ -233,13 +195,4 @@ func (s *SMTPSender) client(token string) (*mail.Client, error) {
 		return nil, fmt.Errorf("mailer: build SMTP client for %s: %w", s.cfg.Host, err)
 	}
 	return client, nil
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -43,6 +43,38 @@ sender, err := mailer.NewSMTPSender(mailer.SMTPConfig{
 A token is fetched for each send and cached until a minute before it expires, so nothing
 here has to reason about expiry.
 
+## Graph, as an alternative to SMTP
+
+`GraphSender` sends through the Microsoft Graph API's `sendMail` endpoint instead of SMTP,
+for a deployment that already has an Entra app registration and would rather not deal with
+SMTP AUTH. It needs its own token, scoped to Graph rather than SMTP:
+
+```go
+tokens, err := msauth.New(tenantID, clientID, clientSecret, msauth.WithScope(msauth.ScopeGraph))
+
+sender, err := mailer.NewGraphSender(mailer.GraphConfig{
+    TokenSource: tokens,
+    From:        "shop@example.com", // needs the Mail.Send application permission, admin-consented
+})
+```
+
+The app registration needs a **different** permission than the SMTP path: **`Mail.Send`**
+(application, admin-consented), not `SMTP.SendAsApp`. The two are not interchangeable, and a
+token that works for one will be rejected by the other.
+
+Sends go as **raw MIME** rather than through Graph's JSON message schema, which is what lets a
+message carry both a plain-text and an HTML part — the JSON schema's `body` takes exactly one
+`contentType`. The cost is that **Bcc has no envelope on this transport**: it is written into
+the MIME as a real header, which Microsoft's documented behaviour says Graph reads as
+recipients and strips before delivering. That behaviour has not been verified against a live
+tenant by this module's maintainer — confirm it with a real send before relying on Bcc through
+Graph in production.
+
+Which transport to reach for: **SMTPSender is the default.** `GraphSender` is for a
+deployment where the tenant-side XOAUTH2 setup (SMTP AUTH enabled per mailbox, a service
+principal, `SMTP.SendAsApp`) is a bigger lift than a `Mail.Send` grant, or where Graph is
+already how the deployment talks to that tenant for something else.
+
 **The tenant-side setup is the part that bites**, and none of it is visible from this
 library — a tenant that has not been set up returns a token perfectly happily and the
 mail server then refuses it. You need, at minimum:

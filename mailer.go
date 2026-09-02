@@ -13,12 +13,21 @@
 // application, it belongs in that application's code, not here. That rule is the
 // only thing keeping this struct from accumulating everything anyone ever needed.
 //
-// # Authentication
+// # Transports
 //
-// SMTPConfig takes either a username and password, or a TokenSource for XOAUTH2 —
-// which is how a Microsoft Exchange Online mailbox is reached now that Basic Auth
-// for SMTP client submission is going away. The msauth subpackage implements a
-// TokenSource against Microsoft's client-credentials flow.
+// SMTPSender is the default and the one most deployments want: a password, or —
+// for a Microsoft Exchange Online mailbox now that Basic Auth for SMTP client
+// submission is going away — a TokenSource for XOAUTH2. GraphSender exists
+// alongside it for a deployment that already has an Entra app registration and
+// would rather call the Microsoft Graph API than deal with SMTP AUTH at all; it
+// needs its own TokenSource, scoped to Graph rather than to SMTP. The msauth
+// subpackage implements a TokenSource against Microsoft's client-credentials
+// flow for either audience — see msauth.ScopeSMTP and msauth.ScopeGraph.
+//
+// Both Microsoft transports carry the same caveat: the tenant-side setup —
+// admin consent, a service principal, mailbox-level permissions — is invisible
+// from here, and a misconfigured tenant hands out a token happily and fails
+// only at the send.
 package mailer
 
 import (
