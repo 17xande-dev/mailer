@@ -385,6 +385,29 @@ func TestSend_HTMLBecomesTheAlternativePart(t *testing.T) {
 	}
 }
 
+// An inline image travels inside the message, related to the HTML that shows it
+// and carrying the Content-ID that HTML names — otherwise the <img> is a broken
+// picture in every client.
+func TestSend_InlineImagesAreRelatedToTheHTML(t *testing.T) {
+	f := newFakeSMTP(t)
+
+	m := receipt()
+	m.HTML = `<p>Your ticket</p><img src="cid:qr-1" alt="">`
+	m.Inline = []Inline{{ContentID: "qr-1", ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfake")}}
+	if err := sendOne(t, configFor(t, f), m); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	// Lower-cased because header names are case-insensitive and the library
+	// writes Content-Id; the value's angle brackets are what matters.
+	got := strings.ToLower(f.message())
+	for _, want := range []string{"multipart/related", "content-id: <qr-1>", "image/png", "text/plain", "text/html"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the message is missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestSend_ReplyToPrefersTheMessageOverTheConfiguredDefault(t *testing.T) {
 	t.Run("message wins", func(t *testing.T) {
 		f := newFakeSMTP(t)
@@ -507,6 +530,21 @@ func TestMessage_Validate(t *testing.T) {
 		"no subject":      {To: []string{"a@example.com"}, Text: "Thank you"},
 		"no text":         {To: []string{"a@example.com"}, Subject: "Receipt", HTML: "<p>Thank you</p>"},
 		"subject newline": {To: []string{"a@example.com"}, Subject: "Receipt\r\nBcc: sneak@example.com", Text: "Thank you"},
+	}
+	png := []byte("\x89PNG")
+	withHTML := func(in ...Inline) Message {
+		return Message{To: []string{"a@example.com"}, Subject: "Receipt", Text: "Thank you", HTML: "<p>x</p>", Inline: in}
+	}
+	cases["inline without html"] = Message{To: []string{"a@example.com"}, Subject: "Receipt", Text: "Thank you",
+		Inline: []Inline{{ContentID: "qr", ContentType: "image/png", Data: png}}}
+	cases["inline id injection"] = withHTML(Inline{ContentID: "qr>\r\nBcc: x@example.com", ContentType: "image/png", Data: png})
+	cases["inline id twice"] = withHTML(
+		Inline{ContentID: "qr", ContentType: "image/png", Data: png},
+		Inline{ContentID: "qr", ContentType: "image/png", Data: png})
+	cases["inline not an image"] = withHTML(Inline{ContentID: "qr", ContentType: "text/html", Data: png})
+	cases["inline empty"] = withHTML(Inline{ContentID: "qr", ContentType: "image/png"})
+	if err := withHTML(Inline{ContentID: "qr-1", ContentType: "image/png", Data: png}).Validate(); err != nil {
+		t.Errorf("a valid inline image was rejected: %v", err)
 	}
 	for name, m := range cases {
 		if err := m.Validate(); err == nil {

@@ -143,6 +143,26 @@ func TestGraphSend_HTMLBecomesTheAlternativePart(t *testing.T) {
 	}
 }
 
+// Graph posts the same MIME the SMTP sender writes, so an inline image arrives
+// as a related part with its bracketed Content-ID here too.
+func TestGraphSend_CarriesInlineImages(t *testing.T) {
+	f, srv := newFakeGraph(t, 0)
+	s := senderForGraph(t, srv, &staticGraphToken{token: "a-token"})
+
+	m := receipt()
+	m.HTML = `<img src="cid:qr-1" alt="">`
+	m.Inline = []Inline{{ContentID: "qr-1", ContentType: "image/png", Data: []byte("\x89PNG\r\n\x1a\nfake")}}
+	if err := s.Send(t.Context(), m); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	got := strings.ToLower(f.last().rawMIME)
+	for _, want := range []string{"multipart/related", "content-id: <qr-1>", "image/png"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the posted MIME is missing %q", want)
+		}
+	}
+}
+
 // Bcc has no envelope on this transport, so it must reach the wire as a real
 // header rather than silently vanishing — the mistake buildMIME's BccInHeaders
 // flag exists to prevent. See its doc comment for what happens on the other

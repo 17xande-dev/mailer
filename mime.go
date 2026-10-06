@@ -1,6 +1,7 @@
 package mailer
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -60,6 +61,18 @@ func buildMIME(m Message, o mimeOptions) (*mail.Msg, error) {
 	msg.SetBodyString(mail.TypeTextPlain, m.Text)
 	if m.HTML != "" {
 		msg.AddAlternativeString(mail.TypeTextHTML, m.HTML)
+	}
+	// Inline images ride as embedded parts, which the library places in a
+	// multipart/related beside the HTML, each with the Content-ID the HTML names.
+	// The angle brackets are ours to add: RFC 2392 says a Content-ID header is
+	// <id> and cid:id refers to it, and the library writes the value verbatim —
+	// without them a strict client matches nothing and shows a broken image.
+	for _, in := range m.Inline {
+		if err := msg.EmbedReader(in.ContentID, bytes.NewReader(in.Data),
+			mail.WithFileContentID("<"+in.ContentID+">"),
+			mail.WithFileContentType(mail.ContentType(in.ContentType))); err != nil {
+			return nil, fmt.Errorf("mailer: inline image %q: %w", in.ContentID, err)
+		}
 	}
 	return msg, nil
 }

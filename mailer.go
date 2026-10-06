@@ -55,6 +55,26 @@ type Message struct {
 	// should be able to answer by replying to the person who sent it, rather than
 	// to the mailbox the software sends from.
 	ReplyTo string
+
+	// Inline is images the HTML body shows by reference — <img src="cid:ID"> —
+	// carried inside the message rather than fetched from a server. A ticket's
+	// QR code is the case it exists for: an image a mail client will not block
+	// as remote content, and that still shows with the reader offline at a door.
+	//
+	// It means the same thing to every transport, which is the bar for a field
+	// here (see the package doc): both write the message as MIME, where an
+	// inline part is a multipart/related sibling of the HTML.
+	Inline []Inline
+}
+
+// Inline is one image an HTML body refers to as cid:ContentID.
+type Inline struct {
+	// ContentID is what the HTML names it by, without angle brackets — "qr-1",
+	// referenced as <img src="cid:qr-1">. Unique within a message.
+	ContentID string
+	// ContentType is the image's MIME type, such as image/png.
+	ContentType string
+	Data        []byte
 }
 
 // Sender delivers a Message. Implementations must be safe for concurrent use:
@@ -100,6 +120,27 @@ func (m Message) Validate() error {
 			strings.Join(m.To, ", "))
 	case m.Text == "":
 		return fmt.Errorf("mailer: message to %s has no plain-text body", strings.Join(m.To, ", "))
+	case len(m.Inline) > 0 && m.HTML == "":
+		// Nothing could show them: an inline part is only ever referenced from
+		// HTML, and a text-only message with images inside it is a mistake.
+		return fmt.Errorf("mailer: message to %s has inline images but no HTML body", strings.Join(m.To, ", "))
+	}
+	seen := make(map[string]bool, len(m.Inline))
+	for _, in := range m.Inline {
+		switch {
+		case in.ContentID == "" || strings.ContainsAny(in.ContentID, "<>\r\n \t\"@"):
+			// Written into a Content-ID header and matched against a cid: URL, so
+			// it has to be a plain token — and a line break in it would be a
+			// header injection like the subject's.
+			return fmt.Errorf("mailer: inline image Content-ID %q must be a plain token", in.ContentID)
+		case seen[in.ContentID]:
+			return fmt.Errorf("mailer: inline image Content-ID %q is used twice", in.ContentID)
+		case !strings.HasPrefix(in.ContentType, "image/") || strings.ContainsAny(in.ContentType, "\r\n"):
+			return fmt.Errorf("mailer: inline %q has content type %q, want an image", in.ContentID, in.ContentType)
+		case len(in.Data) == 0:
+			return fmt.Errorf("mailer: inline image %q is empty", in.ContentID)
+		}
+		seen[in.ContentID] = true
 	}
 	return nil
 }
